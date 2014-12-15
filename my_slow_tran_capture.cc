@@ -43,6 +43,8 @@
 #include "local_addresses.h"
 
 
+#include <mysql.h>
+
 std::tr1::unordered_map<uint64_t, queries_t*> trans;
 uint alert_millis= 4000;
 uint max_packets= 0;
@@ -53,6 +55,25 @@ const char *commit_pattern= "\\s*COMMIT\\s*";
 const char *rollback_pattern= "\\s*ROLLBACK\\s*";
 const char *autocommit0_pattern= "\\s*SET\\s+AUTOCOMMIT\\s*=\\s*0\\s*";
 const char *autocommit1_pattern= "\\s*SET\\s+AUTOCOMMIT\\s*=\\s*1\\s*";
+
+
+char hostname[128]= {0};
+int port= 0;
+char username[128]= {0};
+char password[128]= {0};
+bool use_mysql=0;
+MYSQL mysql;
+MYSQL_STMT *stmt;
+MYSQL_BIND mysql_bind[6];
+char localhost[1024]= {0};
+char format_localhost[1024]= {0};
+char createdb_sql[128]= {0};
+char create_table_sql[1024]= {0};
+char insert_sql[1024]= {0};
+char dbname[128]= {0};
+char cur_table[128]= {0};
+MYSQL_TIME  begin_ts;
+MYSQL_TIME  package_ts;
 
 boost::regex begin_exp(begin_pattern,
   boost::regbase::normal | boost::regbase::icase);
@@ -65,20 +86,20 @@ boost::regex autocommit0_exp(autocommit0_pattern,
 boost::regex autocommit1_exp(autocommit1_pattern,
   boost::regbase::normal | boost::regbase::icase);
 
-enum enum_server_command
-{
-  COM_SLEEP, COM_QUIT, COM_INIT_DB, COM_QUERY, COM_FIELD_LIST,
-  COM_CREATE_DB, COM_DROP_DB, COM_REFRESH, COM_SHUTDOWN, COM_STATISTICS,
-  COM_PROCESS_INFO, COM_CONNECT, COM_PROCESS_KILL, COM_DEBUG, COM_PING,
-  COM_TIME, COM_DELAYED_INSERT, COM_CHANGE_USER, COM_BINLOG_DUMP,
-  COM_TABLE_DUMP, COM_CONNECT_OUT, COM_REGISTER_SLAVE,
-  COM_STMT_PREPARE, COM_STMT_EXECUTE, COM_STMT_SEND_LONG_DATA, COM_STMT_CLOSE,
-  COM_STMT_RESET, COM_SET_OPTION, COM_STMT_FETCH, COM_DAEMON,
-  /* don't forget to update const char *command_name[] in sql_parse.cc */
+/* enum enum_server_command */
+/* { */
+/*   COM_SLEEP, COM_QUIT, COM_INIT_DB, COM_QUERY, COM_FIELD_LIST, */
+/*   COM_CREATE_DB, COM_DROP_DB, COM_REFRESH, COM_SHUTDOWN, COM_STATISTICS, */
+/*   COM_PROCESS_INFO, COM_CONNECT, COM_PROCESS_KILL, COM_DEBUG, COM_PING, */
+/*   COM_TIME, COM_DELAYED_INSERT, COM_CHANGE_USER, COM_BINLOG_DUMP, */
+/*   COM_TABLE_DUMP, COM_CONNECT_OUT, COM_REGISTER_SLAVE, */
+/*   COM_STMT_PREPARE, COM_STMT_EXECUTE, COM_STMT_SEND_LONG_DATA, COM_STMT_CLOSE, */
+/*   COM_STMT_RESET, COM_SET_OPTION, COM_STMT_FETCH, COM_DAEMON, */
+/*   /1* don't forget to update const char *command_name[] in sql_parse.cc *1/ */
 
-  /* Must be last */
-  COM_END
-};
+/*   /1* Must be last *1/ */
+/*   COM_END */
+/* }; */
 
 const LEX_STRING command_name[]={
   { C_STRING_WITH_LEN("Sleep") },
@@ -114,6 +135,8 @@ const LEX_STRING command_name[]={
   { C_STRING_WITH_LEN("Error") }  // Last command number
 };
 
+void store_packet(char* client_host, uint16_t client_port, timeval begin_time,
+                  int package_id, queries_t *query);
 
 void print_time(struct timeval tv)
 {
@@ -124,6 +147,20 @@ void print_time(struct timeval tv)
   printf("%d/%02d/%02d %02d:%02d:%02d.%ld",
          t.tm_year+1900, t.tm_mon+1,
          t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec, tv.tv_usec);
+}
+
+void get_time(struct timeval tv, MYSQL_TIME* ts)
+{
+  time_t timer;
+  struct tm t;
+  timer= tv.tv_sec;
+  localtime_r(&timer, &t);
+  ts->year= t.tm_year+1900;
+  ts->month= t.tm_mon+1;
+  ts->day= t.tm_mday;
+  ts->hour= t.tm_hour;
+  ts->minute= t.tm_min;
+  ts->second= t.tm_sec;
 }
 
 
@@ -174,7 +211,6 @@ int delete_queue(queries_t* queue)
   return 0;
 }
 
-
 void clear_trans()
 {
   std::tr1::unordered_map<uint64_t, queries_t* >::iterator it= trans.begin();
@@ -194,31 +230,38 @@ void print_and_delete_queries(uint64_t key, queries_t* queries,
   uint num_queries=0;
   bool do_print=0;
   queries_t *orig= queries;
+  char src[16], *addr;
+  timeval begin_time;
   while (queries != NULL)
   {
     num_queries++;
     if (num_queries==1)
     {
-      timeval begin_time= queries->tv;
+      begin_time= queries->tv;
       uint timediff= SUB_MSEC(tv, begin_time);
       if (timediff > alert_millis)
       {
         do_print= 1;
-        char src[16], *addr;
         addr= inet_ntoa(raddr);
         strncpy(src, addr, 15);
         src[15]= '\0';
-        printf("\nFrom %s:%d\n", src, rport);
+        if (!use_mysql) {
+          printf("\nFrom %s:%d\n", src, rport);
+        }
       }else
         break;
     }
     if (do_print)
     {
-      print_time(queries->tv);
-      printf(" ");
-      print_direction(queries->direction);
-      printf("\n%s \n", queries->query);
-      fflush(stdout);
+      if (!use_mysql) {
+        print_time(queries->tv);
+        printf(" ");
+        print_direction(queries->direction);
+        printf("\n%s \n", queries->query);
+        fflush(stdout);
+      } else {
+        store_packet(src, rport, begin_time, num_queries, queries);
+      }
     }
     queries= queries->next;
   }
@@ -245,14 +288,13 @@ int outbound(struct tcphdr *tcp, struct timeval tv,
     char *str;
     if (server_code == 0) //OK
     {
-      char *msg= "GOT_OK";
+      const char *msg= "GOT_OK";
       int str_len= strlen(msg);
       str= (char*)malloc(str_len+1);
-      sprintf(str, msg);
-      str[str_len]= '\0';
+      strcpy(str, msg);
     }else if (server_code == 255) //ERROR
     {
-      char *msg_head= "GOT_ERR:";
+      const char *msg_head= "GOT_ERR:";
       int head_len= strlen(msg_head);
       int protocol_head_len;
       if(old_protocol)
@@ -261,16 +303,15 @@ int outbound(struct tcphdr *tcp, struct timeval tv,
         protocol_head_len= 9;
       uint64_t errstr_len= plen - protocol_head_len;
       str= (char*)malloc(head_len+errstr_len+1);
-      sprintf(str, msg_head);
+      memcpy(str, msg_head, head_len);
       memcpy(str+head_len, p+protocol_head_len, errstr_len);
       str[head_len+errstr_len]= '\0';
     }else
     {
-      char *msg= "GOT_RES";
+      const char *msg= "GOT_RES";
       int str_len= strlen(msg);
       str= (char*)malloc(str_len+1);
-      sprintf(str, msg);
-      str[str_len]= '\0';
+      strcpy(str, msg);
     }
     queries_t *t= (queries_t*)malloc(sizeof(queries_t));
     t->tv= tv;
@@ -326,7 +367,7 @@ void parse_query(uint64_t key, unsigned char *p, uint query_length,
     it= trans.find(key);
     if (it != trans.end())
     {
-      char *print_str= "TRAN_END BY ";
+      const char *print_str= "TRAN_END BY ";
       int print_strlen= strlen(print_str);
       queries_t* queries= it->second;
       queries_t *t2= (queries_t*)malloc(sizeof(queries_t));
@@ -382,11 +423,11 @@ void parse_quit(uint64_t key, struct timeval tv, struct in_addr raddr,
   it= trans.find(key);
   if (it != trans.end())
   {
-    char *quit_str= "QUIT";
+    const char *quit_str= "QUIT";
     int quit_strlen= strlen(quit_str);
     queries_t *t= (queries_t*)malloc(sizeof(queries_t));
     char* query= (char*)malloc(quit_strlen+1);
-    sprintf(query, quit_str);
+    strcpy(query, quit_str);
     t->tv= tv;
     t->query= query;
     t->direction= INBOUND;
@@ -560,6 +601,143 @@ void print_usage()
          "-o (set if using older MySQL protocols)\n");
 }
 
+void format_name(char *name)
+{
+  char *p = name;
+  while (*p) {
+    if (*p == '.' || *p == '-') {
+      *p = '_';
+    }
+    p++;
+  }
+}
+
+
+void get_table_name(time_t timer, char* table_name)
+{
+  struct tm t;
+  localtime_r(&timer, &t);
+  sprintf(table_name, "mstc_%d%02d%02d", t.tm_year+1900, t.tm_mon+1, t.tm_mday);
+}
+
+void mysql_error_exit()
+{
+  printf("%s", mysql_error(&mysql));
+  fflush(stdout);
+  exit(1);
+}
+
+void reset_prepare()
+{
+  sprintf(create_table_sql, "CREATE TABLE IF NOT EXISTS %s("
+    "id int unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY comment 'id',"
+    "client_id varchar(64) NOT NULL COMMENT '客户端连接IP+SOCKET',"
+    "trans_ts datetime NOT NULL COMMENT '事务开始时间戳',"
+    "package_id int unsigned NOT NULL COMMENT '包ID',"
+    "package varchar(2000) NOT NULL COMMENT '包内容',"
+    "package_type tinyint NOT NULL COMMENT '包类型，1: inbound  0:outbound',"
+    "package_ts datetime NOT NULL COMMENT '收到包的时间',"
+    "create_ts timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '记录生成时间'"
+    ") engine = innodb default charset utf8 comment 'MySQL长事务日志表';", cur_table);
+  if (mysql_query(&mysql, create_table_sql)) {
+    mysql_error_exit();
+  }
+
+  if (mysql_stmt_reset(stmt)) {
+    mysql_error_exit();
+  }
+  sprintf(insert_sql, "INSERT INTO %s.%s(client_id, trans_ts,"
+      "package_id, package, package_type,package_ts) values(?, ?, ?, ?, ?, ?)", dbname, cur_table);
+  if (mysql_stmt_prepare(stmt, insert_sql, strlen(insert_sql))) {
+    mysql_error_exit();
+  }
+}
+
+void init_connection()
+{
+  bool auto_reconnect=1;
+  const char *cs = "utf8";
+  mysql_init(&mysql);
+
+  /* set auto reconnect */
+  mysql_options(&mysql, MYSQL_OPT_RECONNECT, (char*)&auto_reconnect);
+  mysql_options(&mysql, MYSQL_SET_CHARSET_NAME, (char*)cs);
+
+  if (mysql_real_connect(&mysql, hostname, username,
+        password, "test", port, NULL, 0) == NULL) {
+    mysql_error_exit();
+  }
+
+  /* create database if not exist */
+  sprintf(dbname, "%s_%d", format_localhost, port);
+  sprintf(createdb_sql, "CREATE DATABASE IF NOT EXISTS %s;", dbname);
+  if (mysql_query(&mysql, createdb_sql)) {
+    mysql_error_exit();
+  } else {
+    mysql_select_db(&mysql, dbname);
+  }
+
+  /* prepare the insert stmt for performance */
+  {
+    time_t tt = time(NULL);
+    get_table_name(tt, cur_table);
+    stmt= mysql_stmt_init(&mysql);
+    if (stmt == NULL) {
+      mysql_error_exit();
+    }
+    reset_prepare();
+  }
+}
+
+void store_packet(char* client_host, uint16_t client_port, timeval begin_time,
+                  int package_id, queries_t *query)
+{
+  char table_name[128]={0};
+  char client_id[128]={0};
+  get_table_name(begin_time.tv_sec, table_name);
+  if (strcmp(table_name, cur_table) != 0) {
+    strcpy(cur_table, table_name);
+    reset_prepare();
+  }
+
+  get_time(begin_time, &begin_ts);
+  get_time(query->tv, &package_ts);
+  memset(mysql_bind, 0, sizeof(mysql_bind));
+  sprintf(client_id, "%s:%d", client_host, client_port);
+
+  mysql_bind[0].buffer_type= MYSQL_TYPE_STRING;
+  mysql_bind[0].buffer= client_id;
+  mysql_bind[0].is_null= 0;
+  mysql_bind[0].buffer_length= strlen(client_id);
+
+  mysql_bind[1].buffer_type= MYSQL_TYPE_TIMESTAMP;
+  mysql_bind[1].buffer= (char*)&begin_ts;
+  mysql_bind[1].is_null= 0;
+
+  mysql_bind[2].buffer_type= MYSQL_TYPE_LONG;
+  mysql_bind[2].buffer= (char*)&package_id;
+  mysql_bind[2].is_null= 0;
+
+  mysql_bind[3].buffer_type= MYSQL_TYPE_STRING;
+  mysql_bind[3].buffer= query->query;
+  mysql_bind[3].is_null= 0;
+  mysql_bind[3].buffer_length= strlen(query->query);
+
+  mysql_bind[4].buffer_type= MYSQL_TYPE_TINY;
+  mysql_bind[4].buffer= (char*)&query->direction;
+  mysql_bind[4].is_null= 0;
+
+  mysql_bind[5].buffer_type= MYSQL_TYPE_TIMESTAMP;
+  mysql_bind[5].buffer= (char*)&package_ts;
+  mysql_bind[5].is_null= 0;
+
+  if (mysql_stmt_bind_param(stmt, mysql_bind)) {
+    mysql_error_exit();
+  }
+  if (mysql_stmt_execute(stmt)) {
+    mysql_error_exit();
+  }
+}
 
 int main(int argc, char** argv)
 {
@@ -570,7 +748,7 @@ int main(int argc, char** argv)
   pcap_t *pcap;
   int r;
 
-  while ((r= getopt(argc, argv, "hi:t:f:m:o")) != -1)
+  while ((r= getopt(argc, argv, "hi:t:f:m:ou:H:p:P:")) != -1)
   {
     switch (r)
     {
@@ -594,6 +772,21 @@ int main(int argc, char** argv)
     case 'o':
       old_protocol= 1;
       break;
+    case 'H':
+      strncpy(hostname, optarg, sizeof(hostname)-1);
+      hostname[strlen(hostname)]= '\0';
+      break;
+    case 'u':
+      strncpy(username, optarg, sizeof(username)-1);
+      username[strlen(username)]= '\0';
+      break;
+    case 'p':
+      strncpy(password, optarg, sizeof(password)-1);
+      password[strlen(password)]= '\0';
+      break;
+    case 'P':
+      port= atoi(optarg);
+      break;
     default:
       break;
     }
@@ -603,7 +796,7 @@ int main(int argc, char** argv)
   if (get_addresses() != 0)
     return -1;
 
-  if (!interface || !strlen(interface))
+  if (!strlen(interface))
     sprintf(interface, "any");
 
   printf("Monitoring %s interface..\n", interface);
@@ -640,6 +833,16 @@ int main(int argc, char** argv)
 
   if(old_protocol)
     printf("Capturing MySQL old protocols..\n");
+
+
+  gethostname(localhost, 1024);
+  strcpy(format_localhost, localhost);
+  format_name(format_localhost);
+
+  if (port) {
+    use_mysql = 1;
+    init_connection();
+  }
 
   /* The -1 here stands for "infinity" */
   r= pcap_loop(pcap, (max_packets > 0) ? max_packets : -1, process_packet,

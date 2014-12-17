@@ -665,7 +665,7 @@ void init_connection()
   mysql_options(&mysql, MYSQL_SET_CHARSET_NAME, (char*)cs);
 
   if (mysql_real_connect(&mysql, hostname, username,
-        password, "test", port, NULL, 0) == NULL) {
+        password, NULL, port, NULL, 0) == NULL) {
     mysql_error_exit();
   }
 

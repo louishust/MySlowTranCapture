@@ -751,7 +751,7 @@ int main(int argc, char** argv)
   pcap_t *pcap;
   int r;
 
-  while ((r= getopt(argc, argv, "hi:t:f:m:ou:H:p:P:")) != -1)
+  while ((r= getopt(argc, argv, "hi:t:l:m:ou:H:p:P:")) != -1)
   {
     switch (r)
     {

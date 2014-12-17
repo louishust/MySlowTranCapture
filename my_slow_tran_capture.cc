@@ -640,7 +640,7 @@ void reset_prepare()
     "package varchar(2000) NOT NULL COMMENT '包内容',"
     "package_type tinyint NOT NULL COMMENT '包类型，1: inbound  0:outbound',"
     "package_ts timestamp(6) NOT NULL COMMENT '收到包的时间',"
-    "create_ts timestamp(6) NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '记录生成时间'"
+    "create_ts timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '记录生成时间'"
     ") engine = innodb default charset utf8 comment 'MySQL长事务日志表';", cur_table);
   if (mysql_query(&mysql, create_table_sql)) {
     mysql_error_exit();

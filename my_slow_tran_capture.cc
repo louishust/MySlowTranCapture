@@ -48,6 +48,7 @@
 std::tr1::unordered_map<uint64_t, queries_t*> trans;
 uint alert_millis= 4000;
 uint max_packets= 0;
+int listen_port= 0;
 bool old_protocol= 0;
 
 const char *begin_pattern= "\\s*BEGIN\\s*";
@@ -598,7 +599,8 @@ void process_packet(unsigned char *user, const struct pcap_pkthdr *header,
 
 void print_usage()
 {
-  printf("Usage: smtc -t <alert_millis> -i <interface> -f <filter_rule> "
+  printf("Usage: smtc -t <alert_millis> -i <interface> -l <listen_port>"
+         " -H <mysql_host> -P <mysql_port> -u <mysql_user> -p <mysql_password>"
          "-o (set if using older MySQL protocols)\n");
 }
 
@@ -670,7 +672,7 @@ void init_connection()
   }
 
   /* create database if not exist */
-  sprintf(dbname, "%s_%d", format_localhost, port);
+  sprintf(dbname, "%s_%d", format_localhost, listen_port);
   sprintf(createdb_sql, "CREATE DATABASE IF NOT EXISTS %s;", dbname);
   if (mysql_query(&mysql, createdb_sql)) {
     mysql_error_exit();
@@ -756,9 +758,8 @@ int main(int argc, char** argv)
     case 'h':
       print_usage();
       return 0;
-    case 'f':
-      strncpy(filter, optarg, sizeof(filter)-1);
-      filter[strlen(filter)]= '\0';
+    case 'l':
+      listen_port= atoi(optarg);
       break;
     case 'i':
       strncpy(interface, optarg, sizeof(interface)-1);
@@ -809,12 +810,14 @@ int main(int argc, char** argv)
   }
 
   /* Capture only TCP port 3306*/
-  if (strlen(filter) == 0)
+  if (listen_port == 0)
   {
+    listen_port= 3306;
     sprintf(filter, "tcp port 3306");
     printf("Listening port 3306..\n");
   }else
   {
+    sprintf(filter, "tcp port %d", listen_port);
     printf("Filtering rule: %s\n", filter);
   }
 

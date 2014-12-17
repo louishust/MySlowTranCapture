@@ -161,6 +161,7 @@ void get_time(struct timeval tv, MYSQL_TIME* ts)
   ts->hour= t.tm_hour;
   ts->minute= t.tm_min;
   ts->second= t.tm_sec;
+  ts->second_part= tv.tv_usec/1000;
 }
 
 

@@ -635,12 +635,12 @@ void reset_prepare()
   sprintf(create_table_sql, "CREATE TABLE IF NOT EXISTS %s("
     "id int unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY comment 'id',"
     "client_id varchar(64) NOT NULL COMMENT '客户端连接IP+SOCKET',"
-    "trans_ts datetime NOT NULL COMMENT '事务开始时间戳',"
+    "trans_ts timestamp(6) NOT NULL COMMENT '事务开始时间戳',"
     "package_id int unsigned NOT NULL COMMENT '包ID',"
     "package varchar(2000) NOT NULL COMMENT '包内容',"
     "package_type tinyint NOT NULL COMMENT '包类型，1: inbound  0:outbound',"
-    "package_ts datetime NOT NULL COMMENT '收到包的时间',"
-    "create_ts timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '记录生成时间'"
+    "package_ts timestamp(6) NOT NULL COMMENT '收到包的时间',"
+    "create_ts timestamp(6) NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '记录生成时间'"
     ") engine = innodb default charset utf8 comment 'MySQL长事务日志表';", cur_table);
   if (mysql_query(&mysql, create_table_sql)) {
     mysql_error_exit();

@@ -21,10 +21,10 @@ Listening port 3306..
 Logging transactions that take more than 4000 milliseconds..
 ---------------
 
-* Use -f "filtering rules" to listen to specific IP addresses/ports.
+* Use -l port to listen to specific port.
 Filtering syntax is the same as that of tcpdump.
 --- example ---
-[root]# myslowtrancapture -f "tcp port 5508"
+[root]# myslowtrancapture -l 5508
 Monitoring any interface..
 Filtering rule: tcp port 5508
 Logging transactions that take more than 4000 milliseconds..
@@ -46,6 +46,8 @@ Listening port 3306..
 Logging transactions that take more than 10000 milliseconds..
 Capturing MySQL old protocols..
 ---------------
+
+* Use -u -H -P -p to store the result to database
 
 Limitations:
 * Implicit commit by DDL is not supported (not handled as transaction ends).

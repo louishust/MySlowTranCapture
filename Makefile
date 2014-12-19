@@ -9,8 +9,8 @@ CXXFLAGS= -Wall -O3 `mysql_config --cflags`
 LFLAGS= -Wall -O3
 LIBS= -lpcap -lboost_regex -lmysqlclient
 
-debug: LFLAGS= -g -DDEBUG -pg
-debug: CXXFLAGS= -g -DDEBUG -pg `mysql_config --cflags`
+debug: LFLAGS= -g -DDEBUG
+debug: CXXFLAGS= -g -DDEBUG `mysql_config --cflags`
 debug: release
 
 release: clean

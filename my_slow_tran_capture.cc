@@ -738,7 +738,7 @@ void handle_trans(thd_con* con, trans_t* trans)
 
   get_time(query->tv, &begin_ts);
   get_time(query->tv, &package_ts);
-  memset(mysql_bind, 0, sizeof(mysql_bind));
+  memset(con->mysql_bind, 0, sizeof(con->mysql_bind));
   sprintf(client_id, "%s:%d", trans->client_ip, trans->port);
 
   free(trans);

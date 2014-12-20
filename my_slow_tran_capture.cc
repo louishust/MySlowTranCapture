@@ -278,7 +278,7 @@ void print_and_delete_queries(uint64_t key, queries_t* queries,
     queries= queries->next;
   }
   trans.erase(key);
-  if (!use_mysql) {
+  if (!use_mysql || !do_print) {
     delete_queue(orig);
   } else {
     trans_t* t= (trans_t*)malloc(sizeof(trans_t));
@@ -684,7 +684,7 @@ void init_connection(thd_con* con)
   bool auto_reconnect=1;
   MYSQL *mysql= &(con->mysql);
   const char *cs = "utf8";
-  mysql_init(&con->mysql);
+  mysql_init(mysql);
 
   /* set auto reconnect */
   mysql_options(mysql, MYSQL_OPT_RECONNECT, (char*)&auto_reconnect);
@@ -799,7 +799,6 @@ void* worker_thread(void *ptr)
     handle_trans(con,trans);
   }
 }
-
 
 void spawn_workers(int num)
 {

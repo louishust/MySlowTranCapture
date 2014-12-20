@@ -788,7 +788,6 @@ void* worker_thread(void *ptr)
 {
   thd_con* con = (thd_con*)ptr;
   trans_t* trans;
-  init_connection(con);
   while (1)
   {
     sem_wait(&sem);
@@ -808,6 +807,7 @@ void spawn_workers(int num)
   thread_ids = (pthread_t*)malloc(sizeof(pthread_t) * num);
   for (;i < num; i++) {
    thd_con* my_thd = (thd_con*)malloc(sizeof(thd_con));
+   init_connection(my_thd);
    ret = pthread_create(&thread_ids[i], NULL, worker_thread, (void *)(my_thd));
    if(ret != 0)
    {

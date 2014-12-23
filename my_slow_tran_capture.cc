@@ -429,6 +429,23 @@ void parse_query(uint64_t key, unsigned char *p, uint query_length,
       queries_t* queries= it->second;
       enqueue(queries, t);
       trans[key]= queries;
+      timeval begin_time;
+      begin_time= queries->tv;
+      uint timediff= SUB_MSEC(tv, begin_time);
+      if (timediff > alert_millis)
+      {
+        const char *print_str= "TRAN_END BY OVERTIME";
+        int print_strlen= strlen(print_str);
+        queries_t *t2= (queries_t*)malloc(sizeof(queries_t));
+        char* query2= (char*)malloc(print_strlen+1);
+        sprintf(query2, "%s", print_str);
+        t2->tv= tv;
+        t2->query= query2;
+        t2->direction= INBOUND;
+        t2->next= NULL;
+        enqueue(queries, t2);
+        print_and_delete_queries(key, queries, raddr, rport, tv);
+      }
     }else
     {
       /* Guess that transactions start here. i.e. after SET AUTOCOMMIT=0*/
@@ -797,6 +814,8 @@ void* worker_thread(void *ptr)
     pthread_mutex_unlock(&mutex);
     handle_trans(con,trans);
   }
+
+  return NULL;
 }
 
 void spawn_workers(int num)
